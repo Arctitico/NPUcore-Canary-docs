@@ -1,0 +1,408 @@
+\section{LTP 测试兼容性改进}
+
+本节将介绍 NPUcore-Canary 为提升 LTP（Linux Test Project）测试通过率所做的一系列改进。
+通过系统性地分析测试失败原因并逐一修复，我们将 musl-rv 下的 LTP 测试分数从 319 分提升至 649 分。
+
+\subsection{LTP 测试概述}
+
+LTP 是 Linux 内核的标准测试套件，包含数千个测试用例，覆盖系统调用、文件系统、内存管理、
+进程管理等各个方面。通过 LTP 测试是验证操作系统 POSIX 兼容性的重要手段。
+
+\subsection{目前最大的问题}
+
+目前跑 LTP 测试到一半的时候会出现类似这样的错误：
+
+\begin{lstlisting}[language=Rust]
+[kernel] panicked at 'Heap allocation error, layout = Layout { size: 4096, align: 1 (1 << 0) }', src/mm/heap_allocator.rs:12:5
+\end{lstlisting}
+
+经过分析，我们发现这是由于内存泄漏导致的内存耗尽问题。
+该问题导致无法一次性测试所有能通过的 ltp 测试样例，只能选择性地跑一部分测例。
+
+目前 NPUcore-Canary 的临时方案是把 KERNEL\_HEAP\_SIZE 从 128MB 提升到 256MB 以规避该问题，但这并非根本解决方案。
+未来如果需要进一步提升 LTP 测试分数，仍需定位并修复内存泄漏问题。
+
+\subsection{/proc}
+
+Linux 的 /proc 文件系统提供了访问内核数据结构的接口，许多用户空间程序依赖它获取进程信息。
+NPUcore-BLOSSOM 对 /proc 的支持较为有限，导致多个 LTP 测试失败。
+
+\subsubsection{/proc/self/maps}
+
+\texttt{/proc/self/maps} 文件显示当前进程的内存映射信息，格式如下：
+
+\begin{lstlisting}[language=bash, numbers=none]
+起始地址-结束地址 权限 偏移 设备号 inode 路径名
+# 示例:
+00400000-00452000 r-xp 00000000 08:02 173521 /usr/bin/dbus-daemon
+\end{lstlisting}
+
+我们实现了 \texttt{ProcMaps} 结构体，通过遍历进程的内存区域动态生成映射信息：
+
+\begin{lstlisting}[language=Rust]
+pub struct ProcMaps {
+    pub pid: Option<usize>,  // None 表示当前进程
+    pub offset: Mutex<usize>,
+}
+
+impl ProcMaps {
+    fn get_maps_string(&self) -> String {
+        let task = if let Some(pid) = self.pid {
+            find_task_by_pid(pid)
+        } else {
+            current_task()
+        };
+        let vm = task.vm.lock();
+        let mut result = String::new();
+
+        for area in vm.get_areas() {
+            let start_addr = area.inner.get_start().0 * PAGE_SIZE;
+            let end_addr = area.inner.get_end().0 * PAGE_SIZE;
+            
+            // 构建权限字符串 (r/w/x + s/p)
+            let mut perms = String::with_capacity(4);
+            let perm = area.map_perm;
+            perms.push(if perm.contains(MapPermission::R) { 'r' } else { '-' });
+            perms.push(if perm.contains(MapPermission::W) { 'w' } else { '-' });
+            perms.push(if perm.contains(MapPermission::X) { 'x' } else { '-' });
+            perms.push(if area.is_shared { 's' } else { 'p' });
+            
+            result.push_str(&format!(
+                "{:08x}-{:08x} {} {:08x} {:02x}:{:02x} {} {}\n",
+                start_addr, end_addr, perms, offset, 
+                dev_major, dev_minor, inode, pathname
+            ));
+        }
+        result
+    }
+}
+\end{lstlisting}
+
+\subsubsection{/proc/[pid]/stat}
+
+\texttt{/proc/[pid]/stat} 文件以单行形式提供进程状态信息，包括 PID、进程名、状态、
+父进程 PID、进程组 ID 等字段。这对于 \texttt{getpgid01}、\texttt{wait401} 等测试至关重要。
+
+\begin{lstlisting}[language=Rust]
+pub struct ProcPidStat {
+    pub pid: usize,
+    pub offset: Mutex<usize>,
+}
+
+impl ProcPidStat {
+    fn get_stat_string(&self) -> String {
+        if let Some(task) = find_task_by_pid(self.pid) {
+            let inner = task.acquire_inner_lock();
+            let pid = task.pid.0;
+            let ppid = inner.parent.as_ref()
+                .and_then(|p| p.upgrade())
+                .map(|p| p.pid.0).unwrap_or(0);
+            let pgid = inner.pgid;
+            
+            // 进程状态映射
+            let state = match inner.task_status {
+                TaskStatus::Ready | TaskStatus::Running => 'R',
+                TaskStatus::Interruptible => 'S',
+                TaskStatus::Zombie => 'Z',
+            };
+            
+            // Linux stat 格式: pid (comm) state ppid pgrp session ...
+            format!("{} (process) {} {} {} {} 0 0 ...\n",
+                pid, state, ppid, pgid, task.tgid)
+        } else {
+            String::new()
+        }
+    }
+}
+\end{lstlisting}
+
+\subsubsection{/proc/[pid]/oom\_score\_adj}
+
+OOM（Out of Memory）killer 使用 \texttt{oom\_score\_adj} 来调整进程被杀死的优先级。
+我们在 TCB 中添加了 \texttt{oom\_score\_adj} 字段（范围 -1000 到 1000），
+并实现了对应的读写接口。
+
+\begin{lstlisting}[language=Rust]
+/// 范围: -1000 (永不被杀) 到 1000 (优先被杀)
+pub struct OomScoreAdj {
+    pub pid: Option<usize>,
+    pub offset: Mutex<usize>,
+}
+
+impl OomScoreAdj {
+    fn get_oom_score_string(&self) -> String {
+        if let Some(task) = self.get_target_task() {
+            let inner = task.acquire_inner_lock();
+            format!("{}\n", inner.oom_score_adj)
+        } else {
+            String::from("0\n")
+        }
+    }
+
+    fn set_oom_score_from_string(&self, input: &str) -> Result<(), ()> {
+        let value = input.trim().parse::<i16>().map_err(|_| ())?;
+        if value >= -1000 && value <= 1000 {
+            if let Some(task) = self.get_target_task() {
+                task.acquire_inner_lock().oom_score_adj = value;
+                return Ok(());
+            }
+        }
+        Err(())
+    }
+}
+
+// TCB 中的字段定义
+pub struct TaskControlBlockInner {
+    // ...
+    pub oom_score_adj: i16,  // 默认为 0，fork 时继承父进程的值
+}
+\end{lstlisting}
+
+\subsection{时间子系统完善}
+
+时间相关功能是许多 LTP 测试的基础，我们进行了以下改进：
+
+\subsubsection{Goldfish RTC 驱动}
+
+QEMU 平台提供了 Goldfish RTC 设备用于获取真实世界时间。
+我们实现了该驱动，使内核能够在启动时同步 Unix 时间戳，
+而不是从 0 开始计时。
+
+\begin{lstlisting}[language=Rust]
+/// 初始化Unix时间（从Goldfish RTC读取）
+pub fn init_unix_time() {
+    // Goldfish RTC寄存器: 0x00=TIME_LOW, 0x04=TIME_HIGH
+    const GOLDFISH_RTC_BASE: usize = 0x10_1000;
+    
+    unsafe {
+        let time_low = read_volatile(GOLDFISH_RTC_BASE as *const u32) as u64;
+        let time_high = read_volatile((GOLDFISH_RTC_BASE + 4) as *const u32) as u64;
+        let rtc_ns = (time_high << 32) | time_low;
+        let rtc_sec = (rtc_ns / 1_000_000_000) as usize;
+        
+        let uptime_sec = get_time() / get_clock_freq();
+        let boot_unix_time = rtc_sec.saturating_sub(uptime_sec);
+        UNIX_TIME_OFFSET.store(boot_unix_time, AtomicOrdering::Relaxed);
+    }
+}
+\end{lstlisting}
+
+\subsubsection{64位时间戳支持}
+
+ext4 文件系统的 inode 结构中，时间戳字段（atime、mtime、ctime）使用 32 位存储秒数，
+额外的 \texttt{i\_*\_extra} 字段存储纳秒和扩展纪元。我们完善了这部分的解析逻辑，
+支持完整的 64 位时间戳，避免 2038 年问题。
+
+\subsubsection{clock\_nanosleep 改进}
+
+修复了 \texttt{clock\_nanosleep} 系统调用的参数验证：
+\begin{itemize}
+    \item 验证 \texttt{tv\_nsec} 范围（0 到 999999999）
+    \item 对不支持的时钟类型返回 \texttt{ENOTSUP}
+\end{itemize}
+
+\subsection{文件系统改进}
+
+\subsubsection{ext4 ftruncate 零填充}
+
+POSIX 标准要求：当使用 \texttt{ftruncate} 扩展文件大小时，扩展部分必须填充为零。
+原实现仅更新 inode 大小，未对扩展区域进行零填充。
+我们添加了 \texttt{clear\_at\_block\_cache()} 方法实现这一功能：
+
+\begin{lstlisting}[language=Rust]
+// truncate 时，若文件扩展则清零扩展区域
+if new_size > old_size {
+    self.clear_at_block_cache(old_size, new_size - old_size);
+}
+
+fn clear_at_block_cache(&self, offset: usize, length: usize) -> usize {
+    let mut start = offset;
+    let end = offset + length;
+    loop {
+        let end_current_block = ((start / CACHE_SZ + 1) * CACHE_SZ).min(end);
+        let block_write_size = end_current_block - start;
+        // 将块缓存中对应区域填充为 0
+        self.file_cache_manager.get_cache(...).lock()
+            .modify(0, |data: &mut [u8; PAGE_SIZE]| {
+                data[start % CACHE_SZ..][..block_write_size].fill(0);
+            });
+        if end_current_block == end { break; }
+        start = end_current_block;
+    }
+}
+\end{lstlisting}
+
+\subsubsection{chown 实现}
+
+实现了完整的 \texttt{fchownat} 系统调用：
+
+\begin{lstlisting}[language=Rust]
+pub fn sys_fchownat(dirfd: i32, pathname: *const u8, 
+                    owner: u32, group: u32, _flags: i32) -> isize {
+    // ... 路径解析 ...
+    let stat = target_file.file.get_stat();
+    // -1 (0xFFFFFFFF) 表示保持原值不变
+    let new_uid = if owner == u32::MAX { stat.get_uid() } else { owner };
+    let new_gid = if group == u32::MAX { stat.get_gid() } else { group };
+    target_file.file.set_owner(new_uid, new_gid)
+}
+\end{lstlisting}
+
+\subsubsection{symlinkat 系统调用}
+
+实现了 \texttt{symlinkat} 系统调用（syscall 36），支持创建符号链接。
+
+\subsubsection{路径验证增强}
+
+添加了完整的路径验证逻辑：
+\begin{itemize}
+    \item \texttt{PATH\_MAX}（4096）：路径总长度限制
+    \item \texttt{NAME\_MAX}（255）：单个路径组件长度限制
+    \item 符号链接循环检测，超过限制返回 \texttt{ELOOP}
+\end{itemize}
+
+\subsection{内存管理增强}
+
+\subsubsection{MAP\_SHARED 支持}
+
+实现了 \texttt{mmap} 的 \texttt{MAP\_SHARED} 标志支持。在 \texttt{MapArea} 中添加标志位，
+fork 时对共享映射区域共享物理页面而非写时复制：
+
+\begin{lstlisting}[language=Rust]
+pub struct MapArea {
+    pub is_shared: bool,     // MAP_SHARED 标志
+    pub wipe_on_fork: bool,  // MADV_WIPEONFORK 标志
+    // ...
+}
+
+// fork 时的处理逻辑
+if src_area.is_shared {
+    // 共享映射：直接共享物理页面
+    new_area.map_shared(src_area);
+} else if src_area.wipe_on_fork {
+    // WIPEONFORK：子进程获得零填充页面
+    new_area.map_zeroed();
+} else {
+    // 私有映射：写时复制 (COW)
+    new_area.map_cow(src_area);
+}
+\end{lstlisting}
+
+\subsubsection{madvise 改进}
+
+实现了 \texttt{MADV\_WIPEONFORK} 和 \texttt{MADV\_KEEPONFORK} 标志：
+
+\begin{lstlisting}[language=Rust]
+pub fn madvise(&mut self, addr: usize, length: usize, advice: u32) -> Result<(), isize> {
+    const MADV_WIPEONFORK: u32 = 18;
+    const MADV_KEEPONFORK: u32 = 19;
+    
+    match advice {
+        MADV_WIPEONFORK | MADV_KEEPONFORK => {
+            let wipe = advice == MADV_WIPEONFORK;
+            for area in self.areas.iter_mut() {
+                // 仅对私有匿名页生效，跳过共享/文件映射
+                if area.is_shared || area.map_file.is_some() { continue; }
+                area.wipe_on_fork = wipe;
+            }
+            Ok(())
+        }
+        // ...
+    }
+}
+\end{lstlisting}
+
+\subsubsection{brk 系统调用修复}
+
+修复了 \texttt{brk} 系统调用的若干问题：
+\begin{itemize}
+    \item 正确处理非页对齐的堆增长
+    \item 添加溢出保护
+\end{itemize}
+
+\subsection{系统调用修复}
+
+\subsubsection{dup2/dup3 修复}
+
+\begin{itemize}
+    \item 修正 \texttt{SYSCALL\_DUP3} 的系统调用号（从 20 改为 24）
+    \item 修复 \texttt{newfd} 无效时应返回 \texttt{EBADF} 而非 \texttt{EMFILE}
+    \item 在新架构上，glibc/musl 将 \texttt{dup2} 转换为 \texttt{dup3} 调用
+\end{itemize}
+
+\subsubsection{statx 改进}
+
+\begin{itemize}
+    \item 添加 \texttt{STATX\_\_RESERVED} 掩码验证
+    \item 支持 \texttt{AT\_EMPTY\_PATH} 标志
+    \item 支持 \texttt{AT\_SYMLINK\_NOFOLLOW} 标志
+\end{itemize}
+
+\subsubsection{fcntl 文件锁}
+
+实现了 \texttt{F\_GETLK}、\texttt{F\_SETLK}、\texttt{F\_SETLKW} 命令，
+定义了与 Linux ABI 兼容的 \texttt{Flock} 结构：
+
+\begin{lstlisting}[language=Rust]
+pub const F_RDLCK: i16 = 0;  // 读锁（共享）
+pub const F_WRLCK: i16 = 1;  // 写锁（独占）
+pub const F_UNLCK: i16 = 2;  // 解锁
+
+#[repr(C)]
+pub struct Flock {
+    pub l_type: i16,    // 锁类型
+    pub l_whence: i16,  // 起始位置基准
+    pub l_start: i64,   // 锁起始偏移
+    pub l_len: i64,     // 锁定字节数，0 表示到文件末尾
+    pub l_pid: i32,     // 持有锁的进程 PID（F_GETLK 返回）
+}
+\end{lstlisting}
+
+\subsubsection{新增系统调用}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|l|l|}
+\hline
+\textbf{系统调用号} & \textbf{名称} & \textbf{功能} \\
+\hline
+33 & mknodat & 创建设备文件或 FIFO \\
+\hline
+36 & symlinkat & 创建符号链接 \\
+\hline
+44 & fstatfs & 获取文件系统统计信息 \\
+\hline
+47 & fallocate & 预分配文件空间 \\
+\hline
+81 & sync & 同步文件系统缓存 \\
+\hline
+92 & personality & 设置进程执行域 \\
+\hline
+114 & clock\_getres & 获取时钟分辨率 \\
+\hline
+144 & setgid & 设置进程组 ID \\
+\hline
+146 & setuid & 设置进程用户 ID \\
+\hline
+\end{tabular}
+\caption{新增系统调用}
+\end{table}
+
+\subsection{错误处理规范化}
+
+为了符合 POSIX 标准，我们对错误处理进行了全面的规范化：
+
+\subsubsection{标准错误码}
+
+\begin{itemize}
+    \item \texttt{pread/pwrite}：负偏移返回 \texttt{EINVAL}
+    \item \texttt{splice}：文件到文件的 splice 返回 \texttt{EINVAL}
+    \item \texttt{getcwd}：按 POSIX 标准调整错误检查顺序
+\end{itemize}
+
+\subsubsection{边界检查与溢出保护}
+
+\begin{itemize}
+    \item \texttt{translated\_byte\_buffer}：添加地址溢出保护
+    \item \texttt{contains\_valid\_buffer}：对溢出地址返回 false
+\end{itemize}

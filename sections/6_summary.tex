@@ -1,0 +1,79 @@
+\section{总结与展望}
+
+\subsection{工作总结}
+
+NPUcore-Canary 在 NPUcore-BLOSSOM 的基础上进行了系统性的改进与优化，
+主要工作包括：
+
+\subsubsection{优先级调度系统}
+
+重构了进程调度子系统，从简单的 FIFO 队列演进为支持多策略的优先级调度器：
+\begin{itemize}
+    \item 实现了 99 级实时优先级队列和 40 级普通优先级队列
+    \item 支持 SCHED\_FIFO、SCHED\_RR、SCHED\_NORMAL、SCHED\_IDLE 等调度策略
+    \item 兼容 Linux nice 值标准（-20 到 19）
+    \item 实现了完整的调度相关系统调用
+\end{itemize}
+
+\subsubsection{POSIX 兼容性提升}
+
+通过 LTP 测试驱动的开发方式，系统性地提升了 POSIX 兼容性：
+\begin{itemize}
+    \item LTP 测试分数从 319 分提升至 649 分
+    \item 实现了 /proc 虚拟文件系统的关键接口
+    \item 完善了时间子系统，支持 RTC 和 64 位时间戳
+    \item 修复了文件系统、内存管理、系统调用的多个问题
+    \item 规范化了错误处理逻辑
+\end{itemize}
+
+\subsubsection{代码质量}
+
+\begin{itemize}
+    \item 保持了 Rust 语言的安全特性和 RAII 设计模式
+    \item 完善了日志和调试信息
+    \item 改进了代码结构和可维护性
+\end{itemize}
+
+\subsection{未来展望}
+
+NPUcore-Canary 仍有许多可以改进的方向：
+
+\subsubsection{功能完善}
+
+\begin{itemize}
+    \item 完善网络协议栈，支持更多网络应用
+    \item 实现更多的 /proc 和 /sys 虚拟文件
+    \item 支持更多的文件系统类型
+    \item 完善信号机制和进程间通信
+\end{itemize}
+
+\subsubsection{性能优化}
+
+\begin{itemize}
+    \item 优化调度器的时间复杂度
+    \item 改进文件系统缓存策略
+    \item 优化内存分配器
+    \item 支持多核调度
+\end{itemize}
+
+\subsubsection{测试与文档}
+
+\begin{itemize}
+    \item 继续提升 LTP 测试通过率
+    \item 添加单元测试和集成测试
+    \item 完善技术文档和用户文档
+\end{itemize}
+
+\subsection{致谢}
+
+在 NPUcore-Canary 的设计与实现过程中，我得到了指导老师张羽的悉心指导与帮助。
+老师深厚的学术造诣和丰富的工程经验为项目的顺利推进提供了坚实保障，在关键技术难点的攻关上给予了极具价值的建议。
+
+同时，衷心感谢 NPUcore 团队的前辈们——林祥霖、郭睆、栾承澈、张家文……，
+他们在项目开发过程中提供的技术支持与宝贵建议，极大地拓宽了我的视野并帮助解决了诸多难题。
+
+此外，特别感谢 NPUcore-BLOSSOM 团队提供的优秀开源基础代码，这为本项目的进一步扩展与优化奠定了良好的基石。
+
+最后，感谢全国大学生计算机系统能力大赛组委会提供的学习平台与竞技机会，让我们能够在实践中深入理解操作系统原理，提升系统编程能力。
+
+

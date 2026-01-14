@@ -1,0 +1,308 @@
+\section{NPUcore 内核架构分析}
+
+本节将对 NPUcore-Canary 内核项目的基准版本 NPUcore-BLOSSOM 进行全面分析与介绍。
+NPUcore-BLOSSOM 是西北工业大学 2025 年参加全国大学生计算机系统能力大赛——操作系统设计赛的参赛作品，
+在吸取了 NPUcore+\cite{npucore-plus} (2023年二等奖) 和 NPUcore-IMPACT!!!\cite{npucore-impact} (2024年一等奖) 两个优秀的 NPUcore 家族作品的经验后，
+具备了完善的 EXT4 文件系统支持、HAL 层双架构支持（LoongArch64 与 RISC-V）以及丰富的应用程序兼容性。
+
+本节中的插图均来自 NPUcore-BLOSSOM 项目仓库中的设计文档。
+
+\subsection{整体架构概述}
+
+NPUcore 采用分层架构设计，自底向上分为平台层、硬件抽象层（HAL）、内核层和应用层四个主要层次。
+这种分层设计使得内核具有良好的可移植性和可维护性。
+
+\begin{figure}[htbp]  
+    \centering  
+    \includegraphics[width=1\textwidth]{images/BLOSSOM/整体架构图.png}
+    \caption{NPUcore 整体架构图} 
+    \label{fig:NPUcore architecture} 
+\end{figure}
+
+\textbf{平台层}是系统的基础支撑，为上层提供硬件资源和运行环境。NPUcore 支持多种平台：
+\begin{itemize}
+    \item \textbf{虚拟平台}：\\QEMU 模拟器（同时支持 LoongArch64 和 RISC-V）
+    \item \textbf{物理平台}：\\K210 Board、fu740 Board、VisionFive2 Board（RISC-V）；\\2K1000 Board（LoongArch64）
+\end{itemize}
+
+\textbf{硬件抽象层（HAL）}是 NPUcore-BLOSSOM 团队按照2025全国赛要求新增的关键中间层，通过这层抽象，NPUcore 从单一指令集内核转变为同时支持 LoongArch64 和 RISC-V 两种指令集的内核，大大提高了系统的扩展性。
+HAL 层的核心由 arch 模块、config 模块和 platform 模块组成：
+\begin{itemize}
+    \item \textbf{arch 模块}：实现不同处理器架构的底层操作，包括寄存器操作、trap 处理、内存管理、上下文切换等
+    \item \textbf{config 模块}：为特定架构在 QEMU 虚拟环境下的运行提供参数配置
+    \item \textbf{platform 模块}：适配不同硬件平台，提供底层操作接口以屏蔽硬件差异
+\end{itemize}
+
+\textbf{内核层}是系统的核心，负责管理进程、内存、文件系统等关键资源，并提供进程间通信、中断处理等核心功能。
+
+\textbf{应用层}是系统与用户交互的接口，NPUcore 在实现完整系统调用的基础上，能够通过多项测试程序并支持额外的轻量级应用（如 kilo 文本编辑器、终端版俄罗斯方块等）。
+
+\subsection{进程管理模块}
+
+进程是在系统中运行的程序实例，其生命周期包括创建、就绪、阻塞、运行和退出五个阶段。
+NPUcore 采用如图 \ref{fig:NPUcore process management} 所示的进程管理流程。
+
+\begin{figure}[htbp] 
+    \centering  
+    \includegraphics[width=0.6\textwidth]{images/BLOSSOM/进程管理调度图.png}
+    \caption{NPUcore 进程管理流程图} 
+    \label{fig:NPUcore process management} 
+\end{figure}
+
+\subsubsection{进程的创建}
+
+NPUcore 中进程的创建分为三个步骤：
+\begin{enumerate}
+    \item \textbf{初始进程创建}：内核初始化完毕后，从系统文件中找到 initproc 的 ELF 文件，调用 TaskControlBlock 的 new() 方法创建第一个初始进程
+    \item \textbf{clone 系统调用}：其余所有进程均由初始进程通过 clone 系统调用克隆而来，initproc 是所有进程的祖先
+    \item \textbf{execve 系统调用}：新进程通过 execve 系统调用加载独立的程序代码和数据，完成进程的"变身"
+\end{enumerate}
+
+进程控制块（TaskControlBlock）包含进程的所有状态信息，包括 PID、TID、内核栈、用户栈、文件描述符表、内存映射、信号处理等。
+采用 RAII（资源获取即初始化）思想管理资源，当进程退出时自动释放所有相关资源。
+
+\subsubsection{进程的调度}
+
+NPUcore 实现了阻塞式进程调度，核心数据结构包括：
+\begin{itemize}
+    \item \textbf{TaskManager}：任务管理器，包含就绪队列（ready\_queue）和可中断睡眠队列（interruptible\_queue）
+    \item \textbf{WaitQueue}：等待队列，存放等待特定事件的进程弱引用
+    \item \textbf{TimeoutWaitQueue}：超时等待池，使用二叉堆实现，支持定时唤醒
+\end{itemize}
+
+调度器采用轮询机制，在操作系统运行的任一时刻都尝试从 idle 流程切换到下一个进程。
+进程可通过以下方式被唤醒：
+\begin{itemize}
+    \item 操作系统主动唤醒处于 interruptible 状态的进程
+    \item 定时器中断触发，自动唤醒超时等待池中的进程
+\end{itemize}
+
+\subsection{内存管理模块}
+
+内存管理是操作系统的核心功能之一，NPUcore 实现了完整的虚拟内存机制，
+包括地址空间抽象、多级页表、物理内存分配等功能。
+
+\subsubsection{内核虚拟地址空间}
+
+地址空间（Address Space）通过在内核中建立虚拟地址到物理地址的映射机制，
+为应用程序构建安全、统一的虚拟内存环境。NPUcore 采用图 \ref{fig:NPUcore virtual address space} 所示的内核虚拟地址空间分配策略。
+
+\begin{figure}[htbp] 
+    \centering  
+    \includegraphics[width=0.5\textwidth]{images/BLOSSOM/内核虚拟地址空间图.png}
+    \caption{NPUcore 内核虚拟地址空间图} 
+    \label{fig:NPUcore virtual address space} 
+\end{figure}
+
+各区域的功能如下：
+\begin{itemize}
+    \item \textbf{trampoline}：跳板页面，位于地址空间最高虚拟页面，用于用户态和内核态之间的安全切换
+    \item \textbf{User Stack}：用户栈区域，由高地址向低地址增长
+    \item \textbf{Guard Page}：保护页面，位于相邻用户栈之间，用于检测栈溢出
+    \item \textbf{kernel program}：内核程序加载区，采用恒等映射
+    \item \textbf{temporary storage area}：临时存储区，用于 exec 系统调用时的文件加载
+\end{itemize}
+
+\subsubsection{物理地址空间分布}
+
+在 RISC-V 架构下，QEMU 平台的地址空间分布如图所示：
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.5\textwidth]{images/BLOSSOM/RISCV架构下QEMU平台地址分布图.png}
+    \caption{RISC-V 架构下 QEMU 平台地址分布图} 
+    \label{fig:RISC-V QEMU address distribution} 
+\end{figure}
+
+内核采用恒等映射方式映射自身的代码段（.text）、只读数据段（.rodata）、数据段（.data）和 BSS 段（.bss），
+确保在启用页表机制后仍能直接访问自身各个段。
+
+\subsubsection{地址空间数据结构}
+
+NPUcore 中地址空间的核心数据结构如图所示：
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.5\textwidth]{images/BLOSSOM/地址空间数据结构图.png}
+    \caption{NPUcore 地址空间数据结构图} 
+    \label{fig:NPUcore address space data structure} 
+\end{figure}
+
+地址空间由页表和一系列内存映射区域构成：
+\begin{itemize}
+    \item \textbf{MemorySet}：地址空间的顶层抽象，包含页表和 MapArea 向量
+    \item \textbf{MapArea}：逻辑段，表示一段连续的虚拟内存区域
+    \item \textbf{LinearMap}：线性映射，包含虚拟页号范围和物理页帧追踪器
+    \item \textbf{FrameTracker}：物理页帧追踪器，实现 RAII 自动资源管理
+\end{itemize}
+
+\subsubsection{多级页表机制}
+
+在 RISC-V 架构下，NPUcore 实现了 SV39 三级页表机制。SV39 支持 39 位虚拟内存空间，
+每页 4KB，虚拟地址的高 27 位划分为三级页号，每级 512 个页表项。地址转换过程如图所示：
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=1\textwidth]{images/BLOSSOM/RISCVsv39三级索引地址转换示意图.png}
+    \caption{RISC-V sv39 三级索引地址转换示意图} 
+    \label{fig:RISC-V sv39 address translation} 
+\end{figure}
+
+页表项（PTE）包含物理页号和标志位，标志位包括：
+\begin{itemize}
+    \item V（Valid）：有效位，仅当为 1 时页表项合法
+    \item R/W/X（Read/Write/Execute）：控制页面的读/写/执行权限
+    \item U（User）：控制页面是否允许用户态访问
+    \item G（Global）：全局标志位，任务切换时 TLB 不失效
+    \item A（Accessed）：访问位，记录页面是否被访问过
+    \item D（Dirty）：脏位，记录页面是否被修改过
+\end{itemize}
+
+在 LoongArch64 架构下，NPUcore 实现了 LAMex 分页机制，同样支持 52 位虚拟内存空间和多级页表索引。
+
+\subsubsection{页面错误处理}
+
+NPUcore 实现了完整的页面错误（Page Fault）处理机制，支持懒分配和写时复制（Copy-on-Write）：
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.9\textwidth]{images/BLOSSOM/页面错误处理流程图.png}
+    \caption{NPUcore 页面错误处理流程图} 
+    \label{fig:NPUcore page fault handling} 
+\end{figure}
+
+页面错误的处理逻辑：
+\begin{enumerate}
+    \item 检查发生错误的虚拟地址是否在合法的地址空间范围内
+    \item 若页面未映射：执行懒分配，分配物理页帧并建立映射
+    \item 若页面已映射但触发写错误：执行写时复制，复制页面内容到新的物理页帧
+    \item 若地址非法或权限不足：发送 SIGSEGV 或 SIGBUS 信号
+\end{enumerate}
+
+\subsubsection{物理内存分配}
+
+NPUcore 采用栈式物理内存分配器（StackFrameAllocator），具有以下特点：
+\begin{itemize}
+    \item 使用全局物理内存分配器确保内存分配的一致性和线程安全
+    \item 采用"后进先出"策略管理空闲物理页帧
+    \item 通过 FrameTracker 实现 RAII，页帧在追踪器析构时自动回收
+    \item 支持不初始化分配（alloc\_uninit）以提高性能
+\end{itemize}
+
+\subsection{文件系统模块}
+
+NPUcore 实现了完整的虚拟文件系统（VFS）层，支持 FAT32 和 EXT4 两种文件系统格式。
+
+\subsubsection{文件系统架构}
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.6\textwidth]{images/BLOSSOM/文件系统架构图.png}
+    \caption{NPUcore 文件系统架构图} 
+    \label{fig:NPUcore file system architecture} 
+\end{figure}
+
+文件系统采用分层设计：
+\begin{itemize}
+    \item \textbf{VFS 层}：提供统一的文件操作接口，屏蔽底层文件系统差异
+    \item \textbf{具体文件系统层}：实现 FAT32 和 EXT4 的具体操作
+    \item \textbf{块缓存层}：提供磁盘块的缓存管理
+    \item \textbf{块设备层}：与底层存储设备交互
+\end{itemize}
+
+\subsubsection{VFS 模块组成}
+
+VFS 层包含以下核心模块：
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.7\textwidth]{images/BLOSSOM/文件系统模块图.png}
+    \caption{NPUcore 文件系统模块图} 
+    \label{fig:NPUcore file system modules} 
+\end{figure}
+
+\begin{itemize}
+    \item \textbf{超级块（super block）}：保存文件系统的所有元数据
+    \item \textbf{目录项模块}：管理路径的目录项，采用树形结构组织
+    \item \textbf{inode 模块}：管理具体文件，是文件的唯一标识
+    \item \textbf{打开文件列表模块}：维护所有已打开的文件句柄
+    \item \textbf{file\_operations 模块}：包含所有可用的文件操作函数指针
+    \item \textbf{address\_space 模块}：管理文件在页缓存中的物理页
+\end{itemize}
+
+\subsubsection{文件抽象}
+
+NPUcore 定义了统一的 File trait，提供以下核心操作：
+\begin{itemize}
+    \item 基本操作：read、write、readable、writable
+    \item 元数据操作：get\_size、get\_stat、get\_file\_type
+    \item 目录操作：open、create、unlink、get\_dirent
+    \item 偏移管理：lseek、get\_offset
+    \item 大小管理：modify\_size、truncate\_size
+\end{itemize}
+
+支持的文件类型包括：普通文件、目录、管道（FIFO）、字符设备、块设备、套接字和符号链接。
+
+\subsection{系统调用模块}
+
+系统调用是应用程序与操作系统内核交互的标准接口。NPUcore-BLOSSOM 实现了 POSIX 标准的系统调用接口，
+支持 90 余个系统调用。
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.7\textwidth]{images/BLOSSOM/系统调用整体架构图.png}
+    \caption{NPUcore 系统调用整体架构图} 
+    \label{fig:NPUcore system call architecture} 
+\end{figure}
+
+\subsubsection{系统调用机制}
+
+在 RISC-V 架构中，系统调用通过 ecall 指令触发。当用户态程序执行 ecall 指令时，
+CPU 跳转到由 STVEC 寄存器指定的中断处理程序入口地址。系统调用的具体流程：
+\begin{enumerate}
+    \item 用户态程序调用库函数（如 write）
+    \item 库函数调用 syscall() 函数，将参数放入寄存器
+    \item 执行 ecall 指令，触发 trap 进入内核态
+    \item 内核的 trap\_handler 根据系统调用号分发处理
+    \item 执行完成后通过 trap\_return 返回用户态
+\end{enumerate}
+
+在 LoongArch 架构中，系统调用通过 syscall 指令触发，CPU 自动切换到内核态并跳转到 CSR\_EBASE 寄存器指定的处理程序入口。
+
+\subsubsection{核心系统调用}
+
+NPUcore-BLOSSOM 已实现的核心系统调用包括：
+
+\textbf{进程管理类}：
+\begin{itemize}
+    \item fork/clone：创建子进程，支持多种克隆标志
+    \item execve：加载并执行新程序，支持 ELF 可执行文件和脚本文件
+    \item wait4/waitpid：等待子进程状态变化
+    \item exit/exit\_group：进程退出
+\end{itemize}
+
+\textbf{内存管理类}：
+\begin{itemize}
+    \item brk/sbrk：调整堆空间大小
+    \item mmap/munmap：内存映射和解除映射
+    \item mprotect：修改内存区域保护属性
+\end{itemize}
+
+\textbf{文件操作类}：
+\begin{itemize}
+    \item open/close：打开和关闭文件
+    \item read/write：读写文件
+    \item lseek：移动文件读写位置
+    \item dup/dup2/dup3：复制文件描述符
+    \item pipe/pipe2：创建管道
+\end{itemize}
+
+\textbf{信号处理类}：
+\begin{itemize}
+    \item sigaction：设置信号处理程序
+    \item sigprocmask：设置信号屏蔽字
+    \item kill：发送信号
+\end{itemize}
+
+\textbf{NPUcore-Canary 项目在 NPUcore-BLOSSOM 的基础上进行进一步的优化和扩展，
+后续章节将详细介绍我们所做的改进工作。}

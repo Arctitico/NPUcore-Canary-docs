@@ -1,0 +1,86 @@
+\contentsline {section}{\numberline {一、}概述}{4}{section.1}%
+\contentsline {subsection}{\numberline {1.1}系统简介}{4}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}NPUcore简介}{4}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}NPUcore-Canary当前工作}{5}{subsection.1.3}%
+\contentsline {section}{\numberline {二、}NPUcore 内核架构分析}{7}{section.2}%
+\contentsline {subsection}{\numberline {2.1}整体架构概述}{7}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}进程管理模块}{9}{subsection.2.2}%
+\contentsline {subsubsection}{\numberline {2.2.1}进程的创建}{9}{subsubsection.2.2.1}%
+\contentsline {subsubsection}{\numberline {2.2.2}进程的调度}{10}{subsubsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.3}内存管理模块}{10}{subsection.2.3}%
+\contentsline {subsubsection}{\numberline {2.3.1}内核虚拟地址空间}{10}{subsubsection.2.3.1}%
+\contentsline {subsubsection}{\numberline {2.3.2}物理地址空间分布}{12}{subsubsection.2.3.2}%
+\contentsline {subsubsection}{\numberline {2.3.3}地址空间数据结构}{12}{subsubsection.2.3.3}%
+\contentsline {subsubsection}{\numberline {2.3.4}多级页表机制}{13}{subsubsection.2.3.4}%
+\contentsline {subsubsection}{\numberline {2.3.5}页面错误处理}{14}{subsubsection.2.3.5}%
+\contentsline {subsubsection}{\numberline {2.3.6}物理内存分配}{15}{subsubsection.2.3.6}%
+\contentsline {subsection}{\numberline {2.4}文件系统模块}{15}{subsection.2.4}%
+\contentsline {subsubsection}{\numberline {2.4.1}文件系统架构}{15}{subsubsection.2.4.1}%
+\contentsline {subsubsection}{\numberline {2.4.2}VFS 模块组成}{16}{subsubsection.2.4.2}%
+\contentsline {subsubsection}{\numberline {2.4.3}文件抽象}{16}{subsubsection.2.4.3}%
+\contentsline {subsection}{\numberline {2.5}系统调用模块}{17}{subsection.2.5}%
+\contentsline {subsubsection}{\numberline {2.5.1}系统调用机制}{17}{subsubsection.2.5.1}%
+\contentsline {subsubsection}{\numberline {2.5.2}核心系统调用}{18}{subsubsection.2.5.2}%
+\contentsline {section}{\numberline {三、}优先级调度系统的设计与实现}{19}{section.3}%
+\contentsline {subsection}{\numberline {3.1}调度系统演进}{19}{subsection.3.1}%
+\contentsline {subsubsection}{\numberline {3.1.1}第一阶段：8级优先级队列}{19}{subsubsection.3.1.1}%
+\contentsline {subsubsection}{\numberline {3.1.2}第二阶段：Linux nice 值标准}{19}{subsubsection.3.1.2}%
+\contentsline {subsubsection}{\numberline {3.1.3}第三阶段：多策略调度器}{20}{subsubsection.3.1.3}%
+\contentsline {subsection}{\numberline {3.2}核心数据结构}{21}{subsection.3.2}%
+\contentsline {subsubsection}{\numberline {3.2.1}任务控制块扩展}{21}{subsubsection.3.2.1}%
+\contentsline {subsubsection}{\numberline {3.2.2}多级队列结构}{22}{subsubsection.3.2.2}%
+\contentsline {subsection}{\numberline {3.3}调度算法实现}{22}{subsection.3.3}%
+\contentsline {subsubsection}{\numberline {3.3.1}进程入队逻辑}{22}{subsubsection.3.3.1}%
+\contentsline {subsubsection}{\numberline {3.3.2}进程出队逻辑}{23}{subsubsection.3.3.2}%
+\contentsline {subsection}{\numberline {3.4}相关系统调用}{25}{subsection.3.4}%
+\contentsline {subsubsection}{\numberline {3.4.1}调度策略设置 (sched\_setscheduler)}{25}{subsubsection.3.4.1}%
+\contentsline {subsubsection}{\numberline {3.4.2}优先级设置 (setpriority)}{26}{subsubsection.3.4.2}%
+\contentsline {section}{\numberline {四、}LTP 测试兼容性改进}{27}{section.4}%
+\contentsline {subsection}{\numberline {4.1}LTP 测试概述}{27}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}目前最大的问题}{27}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}/proc}{27}{subsection.4.3}%
+\contentsline {subsubsection}{\numberline {4.3.1}/proc/self/maps}{27}{subsubsection.4.3.1}%
+\contentsline {subsubsection}{\numberline {4.3.2}/proc/[pid]/stat}{29}{subsubsection.4.3.2}%
+\contentsline {subsubsection}{\numberline {4.3.3}/proc/[pid]/oom\_score\_adj}{30}{subsubsection.4.3.3}%
+\contentsline {subsection}{\numberline {4.4}时间子系统完善}{31}{subsection.4.4}%
+\contentsline {subsubsection}{\numberline {4.4.1}Goldfish RTC 驱动}{31}{subsubsection.4.4.1}%
+\contentsline {subsubsection}{\numberline {4.4.2}64位时间戳支持}{31}{subsubsection.4.4.2}%
+\contentsline {subsubsection}{\numberline {4.4.3}clock\_nanosleep 改进}{32}{subsubsection.4.4.3}%
+\contentsline {subsection}{\numberline {4.5}文件系统改进}{32}{subsection.4.5}%
+\contentsline {subsubsection}{\numberline {4.5.1}ext4 ftruncate 零填充}{32}{subsubsection.4.5.1}%
+\contentsline {subsubsection}{\numberline {4.5.2}chown 实现}{33}{subsubsection.4.5.2}%
+\contentsline {subsubsection}{\numberline {4.5.3}symlinkat 系统调用}{33}{subsubsection.4.5.3}%
+\contentsline {subsubsection}{\numberline {4.5.4}路径验证增强}{33}{subsubsection.4.5.4}%
+\contentsline {subsection}{\numberline {4.6}内存管理增强}{33}{subsection.4.6}%
+\contentsline {subsubsection}{\numberline {4.6.1}MAP\_SHARED 支持}{33}{subsubsection.4.6.1}%
+\contentsline {subsubsection}{\numberline {4.6.2}madvise 改进}{34}{subsubsection.4.6.2}%
+\contentsline {subsubsection}{\numberline {4.6.3}brk 系统调用修复}{35}{subsubsection.4.6.3}%
+\contentsline {subsection}{\numberline {4.7}系统调用修复}{35}{subsection.4.7}%
+\contentsline {subsubsection}{\numberline {4.7.1}dup2/dup3 修复}{35}{subsubsection.4.7.1}%
+\contentsline {subsubsection}{\numberline {4.7.2}statx 改进}{35}{subsubsection.4.7.2}%
+\contentsline {subsubsection}{\numberline {4.7.3}fcntl 文件锁}{35}{subsubsection.4.7.3}%
+\contentsline {subsubsection}{\numberline {4.7.4}新增系统调用}{36}{subsubsection.4.7.4}%
+\contentsline {subsection}{\numberline {4.8}错误处理规范化}{36}{subsection.4.8}%
+\contentsline {subsubsection}{\numberline {4.8.1}标准错误码}{36}{subsubsection.4.8.1}%
+\contentsline {subsubsection}{\numberline {4.8.2}边界检查与溢出保护}{36}{subsubsection.4.8.2}%
+\contentsline {section}{\numberline {五、}Vi 编辑器适配}{37}{section.5}%
+\contentsline {subsection}{\numberline {5.1}移植背景}{37}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}代码来源}{37}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}适配工作}{37}{subsection.5.3}%
+\contentsline {subsubsection}{\numberline {5.3.1}移除硬件依赖}{37}{subsubsection.5.3.1}%
+\contentsline {subsubsection}{\numberline {5.3.2}文件系统 API 替换}{38}{subsubsection.5.3.2}%
+\contentsline {subsubsection}{\numberline {5.3.3}终端处理}{38}{subsubsection.5.3.3}%
+\contentsline {subsubsection}{\numberline {5.3.4}其他修改}{40}{subsubsection.5.3.4}%
+\contentsline {subsection}{\numberline {5.4}功能验证}{40}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}其他应用}{42}{subsection.5.5}%
+\contentsline {section}{\numberline {六、}总结与展望}{44}{section.6}%
+\contentsline {subsection}{\numberline {6.1}工作总结}{44}{subsection.6.1}%
+\contentsline {subsubsection}{\numberline {6.1.1}优先级调度系统}{44}{subsubsection.6.1.1}%
+\contentsline {subsubsection}{\numberline {6.1.2}POSIX 兼容性提升}{44}{subsubsection.6.1.2}%
+\contentsline {subsubsection}{\numberline {6.1.3}代码质量}{44}{subsubsection.6.1.3}%
+\contentsline {subsection}{\numberline {6.2}未来展望}{44}{subsection.6.2}%
+\contentsline {subsubsection}{\numberline {6.2.1}功能完善}{45}{subsubsection.6.2.1}%
+\contentsline {subsubsection}{\numberline {6.2.2}性能优化}{45}{subsubsection.6.2.2}%
+\contentsline {subsubsection}{\numberline {6.2.3}测试与文档}{45}{subsubsection.6.2.3}%
+\contentsline {subsection}{\numberline {6.3}致谢}{45}{subsection.6.3}%
+\contentsline {section}{参考文献}{46}{subsection.6.3}%

@@ -1,0 +1,153 @@
+\section{概述}
+
+\subsection{系统简介}
+NPUcore-Canary 是一款采用 Rust 语言开发的现代化宏内核操作系统，基于 NPUcore-BLOSSOM\cite{npucore-blossom} 内核架构进行设计与实现，
+可同时于 RISC-V64 和 LoongArch64 平台运行，集成了较为完整的中断处理机制、进程管理系统、内存管理模块、文件系统等核心组件，
+通过系统调用接口为用户提供高效可靠的服务支持。
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        layer/.style={draw, rounded corners, minimum height=1cm, align=center, font=\small},
+        applayer/.style={layer, fill=blue!15, minimum width=12cm},
+        syscalllayer/.style={layer, fill=orange!20, minimum width=12cm},
+        kernellayer/.style={layer, fill=green!15},
+        driverlayer/.style={layer, fill=yellow!20},
+        hallayer/.style={layer, fill=purple!15, minimum width=12cm},
+        hardlayer/.style={layer, fill=gray!20},
+        module/.style={draw, rounded corners, fill=white, minimum height=0.8cm, align=center, font=\footnotesize},
+        arrow/.style={->, >=stealth, thick},
+    ]
+    
+    % 应用层
+    \draw[fill=blue!15, thick, rounded corners] (-6, 2.2) rectangle (6, 0.4);
+    \node at (0, 1.8) {\textbf{用户空间应用层}};
+    \node[module, fill=blue!30] at (-4, 1) {Shell};
+    \node[module, fill=blue!30] at (-1.5, 1) {LTP 测试};
+    \node[module, fill=blue!30] at (1.5, 1) {Busybox};
+    \node[module, fill=blue!30] at (4, 1) {用户程序};
+    
+    % 系统调用接口层
+    \draw[fill=orange!20, thick, rounded corners] (-6, 0) rectangle (6, -1.0);
+    \node at (0, -0.5) {\textbf{系统调用接口 (syscall)}};
+    
+    % 内核核心层
+    \draw[fill=green!15, thick, rounded corners] (-6, -1.4) rectangle (6, -3.8);
+    \node at (0, -1.8) {\textbf{内核核心层}};
+    \node[module, fill=green!30, minimum width=2.5cm] at (-4.2, -2.8) {进程管理\\(task)};
+    \node[module, fill=green!30, minimum width=2.5cm] at (-1.4, -2.8) {内存管理\\(mm)};
+    \node[module, fill=green!30, minimum width=2.5cm] at (1.4, -2.8) {文件系统\\(fs)};
+    \node[module, fill=green!30, minimum width=2.5cm] at (4.2, -2.8) {网络子系统\\(net)};
+    
+    % 驱动层
+    \draw[fill=yellow!20, thick, rounded corners] (-6, -4.2) rectangle (6, -6.0);
+    \node at (0, -4.6) {\textbf{设备驱动层 (drivers)}};
+    \node[module, fill=yellow!40] at (-3.5, -5.4) {块设备 (block)};
+    \node[module, fill=yellow!40] at (0, -5.4) {串口 (serial)};
+    \node[module, fill=yellow!40] at (3.5, -5.4) {VirtIO};
+    
+    % HAL 层
+    \draw[fill=purple!15, thick, rounded corners] (-6, -6.4) rectangle (6, -8.2);
+    \node at (0, -6.8) {\textbf{硬件抽象层 (HAL)}};
+    \node[module, fill=purple!30] at (-3, -7.6) {中断/异常处理};
+    \node[module, fill=purple!30] at (0, -7.6) {页表管理};
+    \node[module, fill=purple!30] at (3, -7.6) {上下文切换};
+    
+    % 硬件平台层
+    \draw[fill=gray!20, thick, rounded corners] (-6, -8.6) rectangle (-0.2, -9.8);
+    \node at (-3.1, -9.2) {\textbf{RISC-V64}};
+    \draw[fill=gray!20, thick, rounded corners] (0.2, -8.6) rectangle (6, -9.8);
+    \node at (3.1, -9.2) {\textbf{LoongArch64}};
+    
+    % 层间箭头
+    \draw[arrow, gray!60] (0, 0.4) -- (0, 0);
+    \draw[arrow, gray!60] (0, -1.0) -- (0, -1.4);
+    \draw[arrow, gray!60] (0, -3.8) -- (0, -4.2);
+    \draw[arrow, gray!60] (0, -6.0) -- (0, -6.4);
+    \draw[arrow, gray!60] (-3, -8.2) -- (-3, -8.6);
+    \draw[arrow, gray!60] (3, -8.2) -- (3, -8.6);
+    
+    % 右侧标注
+    \node[font=\scriptsize, text=gray, rotate=90] at (6.8, 1.3) {用户态};
+    \node[font=\scriptsize, text=gray, rotate=90] at (6.8, -4.7) {内核态};
+    \draw[dashed, gray] (-6.5, 0.2) -- (6.5, 0.2);
+    
+    \end{tikzpicture}
+    \caption{NPUcore-Canary 整体架构}
+    \label{fig:system-architecture}
+\end{figure}
+
+\subsection{NPUcore简介}
+NPUcore\cite{zhangyu2024rust} 是西北工业大学的实践型教学操作系统，使用 Rust 编程语言进行编写，旨
+在提升操作系统原理实践体验以及探索新型跨指令集教学型操作系统。其由西北工业大
+学团队在 2022 年针对全国计算机系统能力大赛内核赛道、基于 rCore 所设计实现。
+在 NPUcore 的最早的版本中，仅支持 RISC-V 架构，而后在 2024 年，其在原有基础上添
+加了对国产 LoongArch 体系结构的支持。
+
+在 2025 年上半年的开发工作中，NPUcore-BLOSSOM 项目团队成功实现了对 EXT4 文件系统的支持，
+同时构建了 HAL（硬件抽象层），
+使得一份上层核心代码能够同时流畅运行于 LoongArch 和 RISC-V 体系结构之上。
+
+\subsection{NPUcore-Canary当前工作}
+NPUcore-Canary 作为2025年全国大学生计算机系统能力大赛-操作系统设计赛-中西部区域赛-内核实现赛道的参赛作品，
+在 NPUcore-BLOSSOM 的基础上进行改进与扩展，
+参考借鉴了其它内核赛道优秀参赛队伍\cite{rocketos}\cite{npucore-aspera}与 Linux 内核的诸多优秀设计，
+主要进行了以下增量开发：
+
+\begin{itemize}
+    \item \textbf{优先级调度}\\将 BLOSSOM 原有的简单 FIFO 队列逐步演进为支持多策略的优先级调度器，\\实现了与 Linux 兼容的调度语义。
+    \item \textbf{LTP 测试兼容性改进}\\修复已知问题并将支持的系统调用的数量从 107 增加到 125，\\将 musl-rv 的 ltp 测试分数从 319 分提高到 649 分。
+    \item \textbf{应用}\\将 vi 编辑器、2048 游戏、tetris 游戏成功移植到 NPUcore-Canary 上运行。
+\end{itemize}
+
+本项目严格遵循软件工程规范进行增量开发。截至撰写本文时，NPUcore-Canary 共计进行了 84 次提交（Commit），
+其中剔除文档维护等非功能性更新后，核心代码的实质性提交为 57 次。
+
+目前，在 2025 年中西部区域赛-内核实现赛道-VisionFive 2 上取得了满分 102 分：
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=1\textwidth]{images/区域赛rv分数.png}
+    \caption{2025 年中西部区域赛-内核实现赛道-VisionFive 2 分数} 
+    \label{fig:VisionFive 2 score} 
+\end{figure}
+
+\newpage
+
+在 2K1000 开发板上也取得了 102 分：
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=1\textwidth]{images/区域赛la分数.png}
+    \caption{2025 年中西部区域赛-内核实现赛道-2K1000 分数} 
+    \label{fig:2K1000 score}
+\end{figure}
+
+在 2025 年全国赛测试集\cite{testsuits-for-oskernel-pre-2025}上的评测分数如下：
+
+\begin{table}[H]
+    \centering
+    \caption{NPUcore-Canary 在全国赛测试集上的评测结果}
+    \label{tab:test-results}
+    \begin{tabular}{lccccc}
+        \hline
+        \textbf{测试点} & \textbf{glibc-la} & \textbf{glibc-rv} & \textbf{musl-la} & \textbf{musl-rv} & \textbf{总分} \\
+        \hline
+        basic & 102 & 102 & 102 & 102 & 408 \\
+        busybox & 49 & 48 & 54 & 53 & 204 \\
+        cyclictest & 0 & 0 & 0 & 0 & 0 \\
+        iozone & 0 & 0 & 0 & 0 & 0 \\
+        iperf & 0 & 0 & 0 & 0 & 0 \\
+        libcbench & 0 & 0 & 0 & 0 & 0 \\
+        bictest & - & - & 216 & 216 & 432 \\
+        lmbench & 35.53 & 36.27 & 26.95 & 28.41 & 127.16 \\
+        ltp & 0 & 0 & 618 & 649 & 1267 \\
+        lua & 9 & 9 & 9 & 9 & 36 \\
+        netperf & 0 & 0 & 0 & 0 & 0 \\
+        \hline
+        \textbf{总分} & \textbf{195.53} & \textbf{195.27} & \textbf{1025.95} & \textbf{1057.41} & \textbf{2474.16} \\
+        \hline
+    \end{tabular}
+\end{table}
+
+对比 NPUcore-BLOSSOM 在全国赛测试集上的总分 1780.18 分，NPUcore-Canary 提升了 693.98 分，提升幅度达 39\%。

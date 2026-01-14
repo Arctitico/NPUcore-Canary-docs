@@ -1,0 +1,46 @@
+\section{LaTeX 语法快速演示}
+
+\subsection{文本格式}
+这是一段普通文本。我们可以使用 \textbf{加粗}，或者 \textit{斜体}（中文通常用楷体代替斜体）。
+换行不是按回车，而是空一行。
+
+这是第二段。
+
+\subsection{列表展示}
+\begin{enumerate}
+    \item 这是有序列表第一项
+    \item 这是第二项
+    \begin{itemize}
+        \item 这是一个嵌套的无序列表
+        \item 列表项自动缩进
+    \end{itemize}
+\end{enumerate}
+
+\subsection{数学公式}
+我们在内核调度算法中使用了如下公式：
+$$ T_{next} = \alpha T_{now} + (1-\alpha) T_{predicted} $$
+其中 $\alpha$ 是一个平滑因子。
+
+\subsection{代码块}
+以下它是 NPUcore 的入口函数：
+
+\begin{lstlisting}[language=Rust, basicstyle=\ttfamily\small, frame=single]
+#[no_mangle]
+pub fn rust_main() -> ! {
+    clear_bss();
+    println!("Hello, NPUcore!");
+    shut_down();
+}
+\end{lstlisting}
+
+\subsection{插入图片}
+我们在这插个图片试试：
+\begin{figure}[htbp]  % htbp 代表尽量按 Here, Top, Bottom, Page 的顺序尝试放置
+    \centering  % 居中
+    % 假设你的图片在 images 文件夹下
+    \includegraphics[width=1\textwidth]{images/123456.png}
+    \caption{NPUcore 整体架构图} % 图片标题
+    \label{fig:scene} % 这里的 label 是为了给正文引用的
+\end{figure}
+
+如图 \ref{fig:scene} 所示... % 这样引用，哪怕图片位置变了，编号也会自动更新

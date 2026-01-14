@@ -1,0 +1,337 @@
+\section{优先级调度系统的设计与实现}
+
+本节将详细介绍 NPUcore-Canary 对进程调度系统的重构与优化。
+NPUcore-Canary 将 BLOSSOM 原有的简单 FIFO 队列逐步演进为支持多策略的优先级调度器，
+实现了与 Linux 兼容的调度语义。
+
+\subsection{调度系统演进}
+
+NPUcore-BLOSSOM 原有的调度器采用简单的 FIFO（先进先出）队列，
+所有就绪进程被放入同一个队列中，按照入队顺序依次调度执行。
+这种设计虽然简单，但无法满足实时任务和交互式任务的需求。
+
+为了提升系统的调度能力和 POSIX 兼容性，我们对调度系统进行了三个阶段的重构：
+
+\subsubsection{第一阶段：8级优先级队列}
+
+首先，我们将单一的 FIFO 队列扩展为 8 级优先级队列（优先级 0-7）。
+每个优先级对应一个独立的就绪队列，调度器总是从最高优先级的非空队列中取出进程执行。
+
+\begin{lstlisting}[language=Rust]
+pub fn fetch(&self) -> Option<Arc<TaskControlBlock>> {
+    for i in (0..8).rev() { // 优先扫描高优先级队列
+        if let Some(task) = self.ready_queues[i].pop_front() {
+            return Some(task);
+        }
+    }
+    None
+}
+\end{lstlisting}
+
+\subsubsection{第二阶段：Linux nice 值标准}
+
+为了与 Linux 标准兼容，我们将优先级系统从 0-7 的范围迁移到 Linux 的 nice 值标准（-20 到 19），如图 \ref{fig: process nice value range} 所示。
+nice 值越小，优先级越高。这一改动使得 NPUcore-Canary 能够正确响应用户空间的优先级调整请求。
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.5\textwidth]{images/进程nice值的范围和解释.png}
+    \caption{进程nice值的范围和解释} 
+    \label{fig: process nice value range} 
+\end{figure}
+
+\subsubsection{第三阶段：多策略调度器}
+
+最终，我们实现了完整的多策略调度器，支持三类调度队列：
+
+\begin{itemize}
+    \item \textbf{实时队列（RT Queue）}：\\包含 99 个优先级级别（1-99），用于 SCHED\_FIFO 和 SCHED\_RR 策略
+    \item \textbf{普通队列（Normal Queue）}：\\包含 40 个优先级级别，用于 SCHED\_OTHER/SCHED\_NORMAL 策略
+    \item \textbf{空闲队列（Idle Queue）}：\\用于 SCHED\_IDLE 策略，仅在系统完全空闲时调度
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        queue/.style={draw, rounded corners, minimum width=3.2cm, minimum height=0.7cm, align=center},
+        rtqueue/.style={queue, fill=red!20},
+        normalqueue/.style={queue, fill=green!20},
+        idlequeue/.style={queue, fill=gray!20},
+        policy/.style={draw, rounded corners, fill=blue!10, minimum width=1.8cm, minimum height=0.6cm, align=center, font=\small},
+        arrow/.style={->, >=stealth, thick},
+        label/.style={font=\footnotesize\bfseries},
+    ]
+    
+    % 实时队列组（）
+    \node[rtqueue] (rt99) at (0, 0) {rt\_queues[0] \\ \footnotesize 优先级 99};
+    \node[rtqueue] (rt98) at (0, -1.3) {rt\_queues[1] \\ \footnotesize 优先级 98};
+    \node[minimum height=0.5cm] (rtdots) at (0, -2.4) {\vdots};
+    \node[rtqueue] (rt1) at (0, -3.6) {rt\_queues[98] \\ \footnotesize 优先级 1};
+    
+    % 实时队列标签
+    \node[label, red!70!black] at (-2.8, -1.2) {实时队列};
+    \draw[red!50, thick, rounded corners] (-1.9, 0.8) rectangle (1.9, -4.4);
+    
+    % 普通队列组
+    \node[normalqueue] (n20) at (0, -5.3) {normal\_queues[0] \\ \footnotesize nice = -20};
+    \node[normalqueue] (n19) at (0, -6.6) {normal\_queues[1] \\ \footnotesize nice = -19};
+    \node[minimum height=0.5cm] (ndots) at (0, -7.7) {\vdots};
+    \node[normalqueue] (n19p) at (0, -8.9) {normal\_queues[39] \\ \footnotesize nice = 19};
+    
+    % 普通队列标签
+    \node[label, green!50!black] at (-2.7, -7.1) {普通队列};
+    \draw[green!50, thick, rounded corners] (-1.9, -4.5) rectangle (1.9, -9.7);
+    
+    % 空闲队列
+    \node[idlequeue] (idle) at (0, -10.6) {idle\_queue \\ \footnotesize SCHED\_IDLE};
+    
+    % 空闲队列标签
+    \node[label, gray!70!black] at (-2.8, -10.2) {空闲队列};
+    \draw[gray!50, thick, rounded corners] (-1.9, -9.8) rectangle (1.9, -11.4);
+    
+    % 调度策略（左侧）
+    \node[policy] (fifo) at (-5, -0.6) {SCHED\_FIFO};
+    \node[policy] (rr) at (-5, -1.8) {SCHED\_RR};
+    \node[policy] (other) at (-5, -6.5) {SCHED\_OTHER};
+    \node[policy] (batch) at (-5, -7.7) {SCHED\_BATCH};
+    \node[policy] (idlepolicy) at (-5, -10.6) {SCHED\_IDLE};
+    
+    % 策略到队列的箭头
+    \draw[arrow, red!60] (fifo.east) -- (-1.9, -0.6);
+    \draw[arrow, red!60] (rr.east) -- (-1.9, -1.8);
+    \draw[arrow, green!60!black] (other.east) -- (-1.9, -6.5);
+    \draw[arrow, green!60!black] (batch.east) -- (-1.9, -7.7);
+    \draw[arrow, gray!60] (idlepolicy.east) -- (-1.9, -10.6);
+    
+    % fetch() 扫描顺序（右侧）
+    \node[draw, fill=yellow!20, rounded corners, minimum width=1.5cm] (fetch) at (4.5, -5.3) {fetch()};
+    
+    \draw[arrow, dashed, red!70] (fetch.north) |- node[right, pos=0.75, font=\footnotesize] {1. 优先} (1.9, -1.8);
+    \draw[arrow, dashed, green!60!black] (fetch.west) -- node[above, font=\footnotesize] {2. 其次} (1.9, -7.1);
+    \draw[arrow, dashed, gray!60] (fetch.south) |- node[right, pos=0.75, font=\footnotesize] {3. 最后} (1.9, -10.6);
+    
+    % 优先级方向指示
+    \draw[->, thick] (5.5, 0.3) -- (5.5, -10.9);
+    \node[rotate=90, font=\footnotesize] at (6.3, -5.3) {优先级递减};
+    
+    \end{tikzpicture}
+    \caption{多策略调度器架构}
+    \label{fig:scheduler-architecture}
+\end{figure}
+
+\subsection{核心数据结构}
+
+\subsubsection{任务控制块扩展}
+
+为支持多策略调度，我们在 TaskControlBlock 中新增了以下字段：
+
+\begin{lstlisting}[language=Rust]
+pub struct TaskControlBlock {
+    // ... 原有字段 ...
+    /// 调度策略：SCHED_NORMAL, SCHED_FIFO, SCHED_RR, SCHED_IDLE
+    pub sched_policy: SchedPolicy,
+    /// nice 值，范围 -20 到 19，仅用于 SCHED_NORMAL
+    pub nice: i8,
+    /// 实时优先级，范围 1-99，用于 SCHED_FIFO/SCHED_RR
+    pub rt_priority: u8,
+}
+\end{lstlisting}
+
+\subsubsection{多级队列结构}
+
+\begin{lstlisting}[language=Rust]
+pub struct TaskManager {
+    pub rt_queues: [VecDeque<Arc<TaskControlBlock>>; RT_PRIORITY_LEVELS],
+    pub normal_queues: [VecDeque<Arc<TaskControlBlock>>; PRIORITY_LEVELS],
+    pub idle_queue: VecDeque<Arc<TaskControlBlock>>,
+    pub interruptible_queue: VecDeque<Arc<TaskControlBlock>>,
+    
+    pub active_tracker: ActiveTracker,
+}
+\end{lstlisting}
+
+\texttt{TaskManager} 是调度器的核心，管理着所有处于就绪状态和等待状态的任务。其中：
+\begin{itemize}
+    \item \texttt{rt\_queues}: 实时优先级队列数组，包含 99 个双端队列，分别对应实时优先级 1-99。索引 0 对应最高优先级 99。
+    \item \texttt{normal\_queues}: 普通优先级队列数组，包含 40 个双端队列，对应 Linux nice 值 -20 到 19。
+    \item \texttt{idle\_queue}: 空闲任务队列，存放 \texttt{SCHED\_IDLE} 策略的任务，优先级最低。
+    \item \texttt{interruptible\_queue}: 可中断等待队列，存放处于睡眠状态等待事件的任务。
+    \item \texttt{active\_tracker}: 活跃状态追踪器，用于在内存不足（OOM）时识别近期活跃的进程，避免将其错误回收。
+\end{itemize}
+
+\subsection{调度算法实现}
+
+\subsubsection{进程入队逻辑}
+
+\begin{lstlisting}[language=Rust]
+pub fn add(&mut self, task: Arc<TaskControlBlock>) {
+    let inner = task.acquire_inner_lock();
+    let sched_policy = inner.sched_policy;
+    let nice_val = inner.nice;
+    let rt_prio = inner.rt_priority;
+    drop(inner);
+    
+    match SchedClass::from_policy(sched_policy) {
+        SchedClass::Realtime => {
+            // SCHED_FIFO 和 SCHED_RR 都使用实时优先级队列
+            let index = rt_priority_to_index(rt_prio);
+            self.rt_queues[index].push_back(task);
+        }
+        SchedClass::Normal => {
+            // SCHED_OTHER 和 SCHED_BATCH 都使用 nice 值
+            let index = priority_to_index(nice_val);
+            self.normal_queues[index].push_back(task);
+        }
+        SchedClass::Idle => {
+            // SCHED_IDLE 进入空闲队列
+            self.idle_queue.push_back(task);
+        }
+        SchedClass::Deadline => {
+            // TODO: DEADLINE 调度支持
+            log::warn!(
+                "[TaskManager::add] DEADLINE scheduling not implemented, pid={} falls back to normal queue",
+                task.pid.0
+            );
+            self.normal_queues[0].push_back(task);
+        }
+    }
+}
+\end{lstlisting}
+
+\texttt{add} 方法负责将任务加入特定的就绪队列。它首先获取任务内部锁以读取调度策略、Nice 值和实时优先级，然后根据策略类型（\texttt{SchedClass}）进行分发：
+\begin{enumerate}
+    \item \textbf{实时任务}：对于 \texttt{SCHED\_FIFO} 或 \texttt{SCHED\_RR}，根据 \texttt{rt\_priority} 计算队列索引，加入 \texttt{rt\_queues}。
+    \item \textbf{普通任务}：对于 \texttt{SCHED\_NORMAL}，根据 \texttt{nice} 值计算索引，加入 \texttt{normal\_queues}。
+    \item \textbf{空闲任务}：对于 \texttt{SCHED\_IDLE}，直接加入 \texttt{idle\_queue}。
+\end{enumerate}
+这种基于策略的分发机制确保了高优先级任务和低优先级任务在物理结构上的隔离，使调度器能够以 $O(1)$ 的时间复杂度定位到特定优先级的队列。
+
+\subsubsection{进程出队逻辑}
+
+\begin{lstlisting}[language=Rust]
+pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
+    // 首先检查实时队列 (SCHED_FIFO/SCHED_RR)
+    // rt_queues[0] = rt_priority 99 (最高), rt_queues[98] = rt_priority 1 (最低实时)
+    for i in 0..RT_PRIORITY_LEVELS {
+        if let Some(task) = self.rt_queues[i].pop_front() {
+            self.active_tracker.mark_active(task.pid.0);
+            return Some(task);
+        }
+    }
+    
+    // 然后检查普通队列 (SCHED_OTHER/SCHED_BATCH)
+    for i in 0..PRIORITY_LEVELS {
+        if let Some(task) = self.normal_queues[i].pop_front() {
+            self.active_tracker.mark_active(task.pid.0);
+            return Some(task);
+        }
+    }
+    
+    // 最后检查空闲队列 (SCHED_IDLE)
+    if let Some(task) = self.idle_queue.pop_front() {
+        self.active_tracker.mark_active(task.pid.0);
+        return Some(task);
+    }
+    
+    None
+}
+\end{lstlisting}
+
+\texttt{fetch} 方法实现了\textbf{严格优先级调度}逻辑，其执行顺序如下：
+\begin{enumerate}
+    \item \textbf{扫描实时队列}：优先遍历 \texttt{rt\_queues}。由于实时优先级 99 对应索引 0，因此从前往后的遍历顺序自然保证了最高优先级的实时任务最先被调度。
+    \item \textbf{扫描普通队列}：若无实时任务，则遍历 \texttt{normal\_queues}。同样遵循 Nice 值越小（优先级越高）越先调度的原则。
+    \item \textbf{扫描空闲队列}：仅当上述所有队列均为空时，才从 \texttt{idle\_queue} 中获取任务。
+\end{enumerate}
+一旦成功获取任务，调度器会立即调用 \texttt{active\_tracker.mark\_active} 标记该进程为活跃状态，这一机制有效防止了关键进程在系统内存紧张时被 OOM Killer 误杀。
+
+\subsection{相关系统调用}
+
+为了让用户空间程序能够控制调度行为，我们实现了以下系统调用：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|l|l|}
+\hline
+\textbf{系统调用号} & \multicolumn{1}{c|}{\textbf{名称}} & \multicolumn{1}{c|}{\textbf{功能}} \\
+\hline
+118 & sched\_setscheduler & 设置进程的调度策略和参数 \\
+\hline
+119 & sched\_getscheduler & 获取进程的调度策略 \\
+\hline
+120 & sched\_setparam & 设置进程的调度参数 \\
+\hline
+121 & sched\_getparam & 获取进程的调度参数 \\
+\hline
+125 & sched\_get\_priority\_max & 获取指定策略的最大优先级 \\
+\hline
+126 & sched\_get\_priority\_min & 获取指定策略的最小优先级 \\
+\hline
+140 & setpriority & 设置进程/进程组/用户的优先级 \\
+\hline
+141 & getpriority & 获取进程/进程组/用户的优先级 \\
+\hline
+\end{tabular}
+\caption{调度相关系统调用}
+\end{table}
+
+\subsubsection{调度策略设置 (sched\_setscheduler)}
+
+\texttt{sched\_setscheduler} 系统调用用于设置进程的调度策略和实时优先级。其核心逻辑如下：
+
+\begin{lstlisting}[language=Rust]
+pub fn sys_sched_setscheduler(pid: usize, policy: i32, param: *const SchedParam) -> isize {
+    // 验证调度策略合法性
+    if !matches!(policy, SCHED_OTHER | SCHED_FIFO | SCHED_RR | SCHED_BATCH | SCHED_IDLE) {
+        return EINVAL;
+    }
+    
+    // 验证实时优先级范围
+    let rt_prio = unsafe { (*param).sched_priority };
+    match policy {
+        SCHED_FIFO | SCHED_RR => {
+            // 实时策略要求优先级在 1-99 之间
+            if rt_prio < 1 || rt_prio > 99 { return EINVAL; }
+        }
+        _ => {
+            // 普通策略要求实时优先级为 0
+            if rt_prio != 0 { return EINVAL; }
+        }
+    }
+    
+    // 查找进程并更新 TCB
+    if let Some(task) = find_task_by_tgid(pid) {
+        let mut inner = task.acquire_inner_lock();
+        inner.sched_policy = policy as u8;
+        inner.rt_priority = rt_prio as u8;
+        return SUCCESS;
+    }
+    ESRCH
+}
+\end{lstlisting}
+
+该实现确保了实时调度策略必须配置有效的实时优先级（1-99），而普通调度策略（如 \texttt{SCHED\_OTHER}）则必须将实时优先级置为 0，严格遵循 POSIX 标准。
+
+\subsubsection{优先级设置 (setpriority)}
+
+\texttt{setpriority} 系统调用用于调整进程、进程组或特定用户的 Nice 值（静态优先级）。系统会对用户传入的优先级值进行边界检查，确保其限制在 valid 范围内（-20 到 19）：
+
+\begin{lstlisting}[language=Rust]
+pub fn sys_setpriority(which: i32, who: isize, prio: i32) -> isize {
+    // 将优先级截断至 [-20, 19] 范围
+    let prio = prio.clamp(PRIORITY_MIN as i32, PRIORITY_MAX as i32) as i8;
+    
+    match which {
+        PRIO_PROCESS => { // 设置单个进程
+            // 查找并更新指定进程的 nice 值
+        }
+        PRIO_PGRP => { // 设置进程组
+            // 遍历进程组 update 每一项
+        }
+        PRIO_USER => { // 设置用户所有进程
+             // 遍历该用户所有任务
+        }
+        _ => EINVAL,
+    }
+}
+\end{lstlisting}

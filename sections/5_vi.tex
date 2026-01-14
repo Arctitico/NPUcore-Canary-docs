@@ -1,0 +1,220 @@
+\section{Vi 编辑器适配}
+
+为了提升 NPUcore 的实用性，我们将轻量级 vi 编辑器移植到了系统中。
+这使得用户可以直接在 NPUcore 上进行文本编辑，极大地增强了系统的交互能力。
+
+\subsection{移植背景}
+
+在操作系统开发和测试过程中，文本编辑器是不可或缺的工具。
+虽然 NPUcore-BLOSSOM 已经提供了 kilo 编辑器，但 vi 作为 Unix/Linux 世界中最经典的编辑器，
+具有以下优势：
+
+\begin{itemize}
+    \item 功能更加完善，支持撤销/重做、搜索替换、标记跳转等高级功能
+    \item 符合 POSIX 标准，是许多脚本和工具的默认编辑器
+    \item 用户基础广泛，学习成本低
+\end{itemize}
+
+\subsection{代码来源}
+
+我们选择从 pshell 项目\cite{pshell} 移植 vi 编辑器。
+该项目已经将 BusyBox 中的 vi 实现提取为独立可编译的版本，原始代码约 3800 行 C 代码。
+
+BusyBox vi 的原始版权信息：
+\begin{itemize}
+    \item 作者：Sterling Huxley
+    \item 许可证：GPLv2 or later
+\end{itemize}
+
+\subsection{适配工作}
+
+pshell 项目的 vi 原本是为 Raspberry Pi Pico 设计的，依赖 Pico SDK 和 littlefs 文件系统。
+为了在 NPUcore 上运行，我们进行了以下适配工作：
+
+\subsubsection{移除硬件依赖}
+
+原代码依赖以下 Pico SDK 头文件，需要全部移除：
+
+\begin{lstlisting}[language=C]
+// 移除的依赖
+#include "hardware/timer.h"
+#include "pico/stdio.h"
+#include "pico/time.h"
+#include "io.h"
+\end{lstlisting}
+
+替换为标准 POSIX 头文件：
+
+\begin{lstlisting}[language=C]
+// 添加的 POSIX 头文件
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <poll.h>
+\end{lstlisting}
+
+\subsubsection{文件系统 API 替换}
+
+原代码使用 littlefs 文件系统 API，需要替换为 POSIX 标准调用：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|}
+\hline
+\textbf{原 API (littlefs)} & \textbf{新 API (POSIX)} \\
+\hline
+\texttt{fs\_file\_open()} & \texttt{open()} \\
+\texttt{fs\_file\_read()} & \texttt{read()} \\
+\texttt{fs\_file\_write()} & \texttt{write()} \\
+\texttt{fs\_file\_close()} & \texttt{close()} \\
+\texttt{fs\_stat()} & \texttt{stat()} \\
+\texttt{lfs\_file\_t} & \texttt{int} (文件描述符) \\
+\texttt{struct lfs\_info} & \texttt{struct stat} \\
+\hline
+\end{tabular}
+\caption{文件系统 API 映射表}
+\end{table}
+
+\subsubsection{终端处理}
+
+终端是 vi 编辑器的核心交互界面，需要进行以下适配：\\
+
+\textbf{获取终端尺寸}
+
+原代码使用 Pico 特定的 \texttt{get\_screen\_xy()} 函数，
+我们使用 \texttt{ioctl} 系统调用替代：
+
+\begin{lstlisting}[language=C]
+static void get_screen_xy(uint32_t* cols, uint32_t* row) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 
+        && ws.ws_col > 0 && ws.ws_row > 0) {
+        *cols = ws.ws_col;
+        *row = ws.ws_row;
+    } else {
+        *cols = 80;  // 默认值
+        *row = 24;
+    }
+}
+\end{lstlisting}
+
+\vspace{0.5cm}
+
+\textbf{键盘输入处理} 
+
+原代码使用 \texttt{getchar\_timeout\_us()} 进行带超时的输入读取。
+我们使用 \texttt{poll()} + \texttt{read()} 组合实现相同功能：
+
+\begin{lstlisting}[language=C]
+static int safe_poll(uint8_t* buffer, int ms) {
+    if (ms < 0) {
+        // 阻塞读取
+        ssize_t n = read(STDIN_FILENO, buffer, 1);
+        return (n > 0) ? 1 : 0;
+    } else {
+        // 带超时的非阻塞读取
+        struct pollfd pfd;
+        pfd.fd = STDIN_FILENO;
+        pfd.events = POLLIN;
+        int ret = poll(&pfd, 1, ms);
+        if (ret > 0 && (pfd.revents & POLLIN)) {
+            ssize_t n = read(STDIN_FILENO, buffer, 1);
+            return (n > 0) ? 1 : 0;
+        }
+        return 0;
+    }
+}
+\end{lstlisting}
+
+\vspace{0.5cm}
+
+\textbf{终端原始模式} 
+
+vi 需要逐字符读取用户输入，必须将终端设置为原始模式（raw mode）：
+
+\begin{lstlisting}[language=C]
+static void enable_raw_mode(void) {
+    struct termios raw;
+    
+    if (tcgetattr(STDIN_FILENO, &orig_termios) == 0) {
+        termios_saved = 1;
+        atexit(disable_raw_mode);
+        
+        raw = orig_termios;
+        // 禁用输入处理
+        raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+        // 禁用输出处理
+        raw.c_oflag &= ~(OPOST);
+        // 8位字符
+        raw.c_cflag |= (CS8);
+        // 禁用回显和规范模式
+        raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+        
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    }
+}
+\end{lstlisting}
+
+\subsubsection{其他修改}
+
+\begin{itemize}
+    \item 移除 \texttt{UDATA} 节属性宏，使用普通静态变量
+    \item 重命名 \texttt{argc}/\texttt{optind} 变量避免与标准库冲突
+    \item 实现简化版 \texttt{full\_path()} 函数
+    \item 添加 \texttt{main()} 入口函数
+\end{itemize}
+
+\subsection{功能验证}
+
+我们通过实际运行测试验证了 vi 编辑器的核心功能。
+
+首先，在命令行启动 vi 并指定文件名 \texttt{test.txt}：
+
+\begin{lstlisting}[language=bash]
+    vi-riscv64 test.txt
+\end{lstlisting}
+
+如图 \ref{fig:vi-edit} 所示，进入编辑器后可以正常进行文本输入（插入模式）。
+随后使用 \texttt{:wq} 命令保存并退出，如图 \ref{fig:vi-save} 所示。
+最后，通过 \texttt{cat} 命令查看文件内容，确认数据已正确写入磁盘，如图 \ref{fig:vi-cat} 所示。
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.9\textwidth]{images/vi编辑文件.png}
+    \caption{在 vi 中编辑文件内容} 
+    \label{fig:vi-edit} 
+\end{figure}
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.9\textwidth]{images/vi保存并退出.png}
+    \caption{使用 :wq 命令保存并退出} 
+    \label{fig:vi-save} 
+\end{figure}
+
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.9\textwidth]{images/vi验证文件结果.png}
+    \caption{验证文件内容正确写入} 
+    \label{fig:vi-cat} 
+\end{figure}
+
+\subsection{其他应用}
+
+除了 vi 编辑器，我们还成功将 2048 游戏移植到了 NPUcore：
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.7\textwidth]{images/2048.png}
+    \caption{2048 游戏运行截图} 
+    \label{fig:2048} 
+\end{figure}
+
+成功将 tetris 俄罗斯方块游戏移植到了 NPUcore：
+\begin{figure}[H] 
+    \centering  
+    \includegraphics[width=0.85\textwidth]{images/tetris.png}
+    \caption{tetris 俄罗斯方块游戏运行截图} 
+    \label{fig:tetris} 
+\end{figure}

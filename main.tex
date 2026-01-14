@@ -1,0 +1,126 @@
+%!TEX program = xelatex
+\documentclass[a4paper,12pt]{ctexart}
+
+\usepackage{geometry}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{tikz}
+\usepackage[backend=biber,style=gb7714-2015]{biblatex}
+\addbibresource{ref.bib}
+
+% 系统自带的文鼎宋体
+\setCJKmainfont{AR PL UMing CN}[AutoFakeBold, AutoFakeSlant]
+\setCJKsansfont{AR PL UMing CN}[AutoFakeBold]
+\setCJKmonofont{AR PL UMing CN}
+
+% 定义 Rust 语言高亮
+\lstdefinelanguage{Rust} {
+    keywords={true,false,auto,break,case,char,const,continue,default,do,double,else,enum,extern,float,for,goto,if,int,long,register,return,short,signed,sizeof,static,struct,switch,typedef,union,unsigned,void,volatile,while,asm,bool,catch,class,const_cast,delete,dynamic_cast,explicit,export,friend,inline,mutable,namespace,new,operator,private,protected,public,reinterpret_cast,static_cast,template,this,throw,try,typeid,typename,using,virtual,wchar_t,abstract,alignof,as,become,box,crate,final,fn,impl,in,let,loop,macro,match,mod,move,mut,offsetof,override,priv,proc,pub,pure,ref,self,super,trait,type,typeof,unsafe,unsized,use,where,yield,async,await,dyn},
+    keywordstyle=\color{purple}\bfseries,
+    ndkeywords={self, String, Option, Result, Box, Vec, usize, i32, u32, i64, u64, f32, f64, bool},
+    ndkeywordstyle=\color{teal}\bfseries,
+    identifierstyle=\color{black},
+    sensitive=true,
+    comment=[l]{//},
+    morecomment=[s]{/*}{*/},
+    commentstyle=\color{gray}\ttfamily,
+    stringstyle=\color{red}\ttfamily,
+    morestring=[b]",
+    morestring=[b]'
+}
+
+% 代码块全局样式设置
+\lstset{
+    basicstyle=\ttfamily\small,
+    backgroundcolor=\color{gray!5},        % 灰色背景
+    keywordstyle=\color{purple}\bfseries,
+    commentstyle=\color{gray}\ttfamily,
+    stringstyle=\color{red}\ttfamily,
+    numbers=left,                          % 左侧显示行号
+    numberstyle=\tiny\color{gray},         % 行号样式
+    numbersep=8pt,                         % 行号与代码的间距
+    frame=single,                          % 单线边框
+    framerule=0.5pt,                       % 边框粗细
+    rulecolor=\color{gray!50},             % 边框颜色
+    xleftmargin=2em,                       % 左边距（给行号留空间）
+    framexleftmargin=1.5em,                % 边框左边距
+    breaklines=true,                       % 自动换行
+    tabsize=4,                             % tab 宽度
+    showstringspaces=false,                % 不显示字符串中的空格
+    captionpos=b,                          % 标题在底部
+}
+
+% 设置页面边距
+\geometry{a4paper, scale=0.8}
+
+% 修复 fancyhdr 页眉高度警告
+\setlength{\headheight}{14.6pt}
+\addtolength{\topmargin}{-2.6pt}
+
+% 设置超链接颜色
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+}
+
+\ctexset{
+  section = {
+    name = {,、},
+    number = \chinese{section},
+    format = \Large\bfseries\raggedright
+  }
+}
+
+% 设置页眉页脚样式
+\pagestyle{fancy}
+\fancyhf{} % 清空当前所有页眉页脚设置
+\fancyhead[C]{操作系统内核设计-NPUcore-Canary} % 页眉中心设置标题
+\fancyfoot[C]{\thepage} % 页脚中心设置页码
+\renewcommand{\headrulewidth}{0.4pt} % 页眉横线
+\renewcommand{\footrulewidth}{0pt} % 移除页脚横线
+
+\begin{document}
+
+% 封面
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+
+    \includegraphics[width=0.9\textwidth]{images/nwpu.png} \\[2cm]
+    
+    {\Huge \bfseries NPUcore-Canary 设计文档 \par}
+    \vspace{4cm}
+    
+    {\Large \textbf{作者：} 杨茂靓 \par}
+    {\Large \textbf{指导老师：} 张羽 \par}
+    \vspace{2cm}
+    
+    {\Large \today \par}
+    \vfill
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\input{sections/1_intro}
+\newpage
+\input{sections/2_NPUcore.tex}
+\newpage
+\input{sections/3_scheduler.tex}
+\newpage
+\input{sections/4_ltp.tex}
+\newpage
+\input{sections/5_vi.tex}
+\newpage
+\input{sections/6_summary.tex}
+\newpage
+\input{sections/9_ref.tex}
+
+\end{document}
