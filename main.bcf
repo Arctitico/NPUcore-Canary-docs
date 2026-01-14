@@ -2929,10 +2929,11 @@
     <bcf:citekey order="2" intorder="1">zhangyu2024rust</bcf:citekey>
     <bcf:citekey order="3" intorder="1">rocketos</bcf:citekey>
     <bcf:citekey order="4" intorder="1">npucore-aspera</bcf:citekey>
-    <bcf:citekey order="5" intorder="1">testsuits-for-oskernel-pre-2025</bcf:citekey>
-    <bcf:citekey order="6" intorder="1">npucore-plus</bcf:citekey>
-    <bcf:citekey order="7" intorder="1">npucore-impact</bcf:citekey>
-    <bcf:citekey order="8" intorder="1">pshell</bcf:citekey>
+    <bcf:citekey order="5" intorder="1">npucore-rainbowww</bcf:citekey>
+    <bcf:citekey order="6" intorder="1">testsuits-for-oskernel-pre-2025</bcf:citekey>
+    <bcf:citekey order="7" intorder="1">npucore-plus</bcf:citekey>
+    <bcf:citekey order="8" intorder="1">npucore-impact</bcf:citekey>
+    <bcf:citekey order="9" intorder="1">pshell</bcf:citekey>
   </bcf:section>
   <!-- SORTING TEMPLATES -->
   <bcf:sortingtemplate name="none">

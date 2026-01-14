@@ -141,12 +141,36 @@
       \endverb
       \keyw{npucore-aspera}
     \endentry
-    \entry{testsuits-for-oskernel-pre-2025}{online}{}
+    \entry{npucore-rainbowww}{online}{}
       \list{language}{1}{%
         {chinese}%
       }
       \field{sortinit}{5}
       \field{sortinithash}{20e9b4b0b173788c5dace24730f47d8c}
+      \field{labeltitlesource}{title}
+      \field{langid}{english}
+      \field{languageid}{chinese}
+      \field{lansortorder}{1}
+      \field{note}{Accessed: 2026-01-14}
+      \field{title}{NPUcore-rainbowww 项目仓库}
+      \field{usera}{EB}
+      \field{userd}{chinese}
+      \field{year}{2025}
+      \field{dateera}{ce}
+      \verb{urlraw}
+      \verb https://gitlab.eduxiji.net/T202510699997612/OSKernel2025-rainbowww
+      \endverb
+      \verb{url}
+      \verb https://gitlab.eduxiji.net/T202510699997612/OSKernel2025-rainbowww
+      \endverb
+      \keyw{npucore-rainbowww}
+    \endentry
+    \entry{testsuits-for-oskernel-pre-2025}{online}{}
+      \list{language}{1}{%
+        {chinese}%
+      }
+      \field{sortinit}{6}
+      \field{sortinithash}{b33bc299efb3c36abec520a4c896a66d}
       \field{labeltitlesource}{title}
       \field{langid}{english}
       \field{languageid}{chinese}
@@ -169,8 +193,8 @@
       \list{language}{1}{%
         {chinese}%
       }
-      \field{sortinit}{6}
-      \field{sortinithash}{b33bc299efb3c36abec520a4c896a66d}
+      \field{sortinit}{7}
+      \field{sortinithash}{108d0be1b1bee9773a1173443802c0a3}
       \field{labeltitlesource}{title}
       \field{langid}{english}
       \field{languageid}{chinese}
@@ -193,8 +217,8 @@
       \list{language}{1}{%
         {chinese}%
       }
-      \field{sortinit}{7}
-      \field{sortinithash}{108d0be1b1bee9773a1173443802c0a3}
+      \field{sortinit}{8}
+      \field{sortinithash}{a231b008ebf0ecbe0b4d96dcc159445f}
       \field{labeltitlesource}{title}
       \field{langid}{english}
       \field{languageid}{chinese}
@@ -217,8 +241,8 @@
       \list{language}{1}{%
         {chinese}%
       }
-      \field{sortinit}{8}
-      \field{sortinithash}{a231b008ebf0ecbe0b4d96dcc159445f}
+      \field{sortinit}{9}
+      \field{sortinithash}{0a5ebc79d83c96b6579069544c73c7d4}
       \field{labeltitlesource}{title}
       \field{langid}{english}
       \field{languageid}{chinese}
